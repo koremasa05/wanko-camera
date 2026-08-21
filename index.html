@@ -321,7 +321,7 @@
   <div id="start-screen">
     <div id="start-emoji">🐾</div>
     <h1>わんこカメラ</h1>
-    <p>頭を見つけたら、すかさずわんこを乗せます。<br>
+    <p>顔を見つけたら、まるごとわんこの顔にします。<br>
       傾きにぴったり合わせて乗るので、無駄に精巧です。<br>
       カメラへのアクセスを許可してはじめてください。<br>
       撮影データは端末の外へは送信されません。</p>
@@ -429,11 +429,11 @@
    * ---------------------------------------------------------------- */
   var STYLES = [
     { id:"shiba",  name:"しばわん",   ear:"#D98E4B", earIn:"#F6DDB8", furTip:"#B8703A", accessory:null,        droop:0.0  },
-    { id:"kuro",   name:"くろわん",   ear:"#3B2A20", earIn:"#5C4433", furTip:"#241812", accessory:null,        droop:0.35 },
-    { id:"buchi",  name:"ぶちわん",   ear:"#2B2B2B", earIn:"#FFFFFF", furTip:"#111111", accessory:null,        droop:0.15, spotted:true },
+    { id:"kuro",   name:"くろわん",   ear:"#3B2A20", earIn:"#8A6A50", furTip:"#241812", accessory:null,        droop:0.35 },
+    { id:"buchi",  name:"ぶちわん",   ear:"#2B2B2B", earIn:"#F2F2F2", furTip:"#111111", accessory:null,        droop:0.15, spotted:true },
     { id:"nemu",   name:"ねむねむ",   ear:"#C9A27E", earIn:"#EBD3B3", furTip:"#A9835F", accessory:"sleepy",    droop:0.55 },
     { id:"sun",    name:"サンわん",   ear:"#8B5A3C", earIn:"#C99568", furTip:"#5C3A22", accessory:"sunglasses",droop:0.1  },
-    { id:"ninja",  name:"にんじゃ",   ear:"#4A2C1D", earIn:"#6B4530", furTip:"#2C1A10", accessory:"headband",  droop:0.05 },
+    { id:"ninja",  name:"にんじゃ",   ear:"#4A2C1D", earIn:"#8A6247", furTip:"#2C1A10", accessory:"headband",  droop:0.05 },
     { id:"hime",   name:"おひめさま", ear:"#F2B5C4", earIn:"#FDE0E8", furTip:"#E191A8", accessory:"ribbon",    droop:0.2  },
     { id:"fuwa",   name:"ふわもこ",   ear:"#FFFFFF", earIn:"#F5EFE4", furTip:"#E4DCCB", accessory:null,        droop:0.25, fluffy:true }
   ];
@@ -618,6 +618,7 @@
       state.stream = stream;
       video.srcObject = stream;
       video.classList.toggle("mirror", state.facing === "user");
+      smoothed = []; // カメラを切り替えたら追従の履歴をリセット
       return new Promise(function(res){
         video.onloadedmetadata = function(){
           video.play();
@@ -629,8 +630,12 @@
   }
 
   function resizeCanvas(){
-    var r = overlay.getBoundingClientRect();
-    overlay.width = r.width; overlay.height = r.height;
+    // getBoundingClientRect はズーム(transform:scale)の影響を受けるので clientWidth を使う
+    var w = overlay.clientWidth, h = overlay.clientHeight;
+    if (!w || !h) return;
+    var dpr = Math.min(window.devicePixelRatio || 1, 2);
+    overlay.width  = Math.round(w * dpr);
+    overlay.height = Math.round(h * dpr);
   }
   window.addEventListener("resize", resizeCanvas);
 
@@ -669,8 +674,8 @@
       chip.dataset.index = i;
       var sw = document.createElement("div");
       sw.className = "swatch";
-      sw.style.background = st.ear;
-      sw.innerHTML = miniEarIcon(st);
+      sw.style.background = "rgba(255,248,239,0.10)";
+      sw.innerHTML = miniDogIcon(st);
       var label = document.createElement("span");
       label.textContent = st.name;
       chip.appendChild(sw); chip.appendChild(label);
@@ -683,9 +688,16 @@
       wrap.appendChild(chip);
     });
   }
-  function miniEarIcon(st){
-    return '<svg width="26" height="26" viewBox="0 0 40 40">' +
-      '<ellipse cx="20" cy="20" rx="10" ry="13" fill="' + st.earIn + '"/></svg>';
+  function miniDogIcon(st){
+    return '<svg width="36" height="36" viewBox="0 0 40 40">' +
+      '<path d="M7 13 L4.5 3 L15 8.5 Z" fill="' + st.ear + '"/>' +
+      '<path d="M33 13 L35.5 3 L25 8.5 Z" fill="' + st.ear + '"/>' +
+      '<ellipse cx="20" cy="21.5" rx="13.5" ry="14" fill="' + st.ear + '"/>' +
+      '<ellipse cx="20" cy="26.5" rx="8.5" ry="7.5" fill="' + st.earIn + '"/>' +
+      '<circle cx="14.8" cy="18.5" r="2.3" fill="#2A1A12"/>' +
+      '<circle cx="25.2" cy="18.5" r="2.3" fill="#2A1A12"/>' +
+      '<ellipse cx="20" cy="24" rx="2.7" ry="2.1" fill="#2A1A12"/>' +
+      '</svg>';
   }
 
   /* ---------------- サイズ / もりもり ---------------- */
@@ -741,47 +753,90 @@
       .finally(function(){ state.detecting = false; });
   }
 
+  var smoothed = [];
+
   function render(results){
-    octx.clearRect(0,0,overlay.width, overlay.height);
-    var scaleX = overlay.width / video.videoWidth;
-    var scaleY = overlay.height / video.videoHeight;
+    octx.clearRect(0, 0, overlay.width, overlay.height);
+    var vw = video.videoWidth, vh = video.videoHeight;
+    if (!vw || !vh) return;
+
+    // video は object-fit:cover で表示されるため、同じ拡大・切り取りを座標にも適用する
+    var scale = Math.max(overlay.width / vw, overlay.height / vh);
+    var offX = (overlay.width  - vw * scale) / 2;
+    var offY = (overlay.height - vh * scale) / 2;
+
     var mirror = state.facing === "user";
     var style = STYLES[state.styleIndex];
     var sizeMult = SIZES[state.sizeIndex].mult;
 
+    var toCanvas = function(p){
+      var x = p.x * scale + offX, y = p.y * scale + offY;
+      if (mirror) x = overlay.width - x;   // 表示が左右反転しているので合わせる
+      return { x:x, y:y };
+    };
+
+    var params = [];
     results.forEach(function(res){
       var lm = res.landmarks;
-      var leftEyePts = lm.getLeftEye(), rightEyePts = lm.getRightEye();
       var jaw = lm.getJawOutline();
       var nose = lm.getNose();
 
-      var lc = avgPoint(leftEyePts), rc = avgPoint(rightEyePts);
-      var toCanvas = function(p){
-        var x = p.x * scaleX, y = p.y * scaleY;
-        if (mirror) x = overlay.width - x;
-        return { x:x, y:y };
-      };
-      var lcC = toCanvas(lc), rcC = toCanvas(rc);
-      // ミラー時は左右反転するので、角度計算はミラー後の座標で行う
+      var eyeA = toCanvas(avgPoint(lm.getLeftEye()));
+      var eyeB = toCanvas(avgPoint(lm.getRightEye()));
+      // ミラー表示では画面上の左右が入れ替わるため、ここで入れ替えないと
+      // 角度が180度ずれてイラストが上下逆さまになる
+      var lcC = mirror ? eyeB : eyeA;
+      var rcC = mirror ? eyeA : eyeB;
+
       var eyeDist = Math.hypot(rcC.x - lcC.x, rcC.y - lcC.y);
       var angle = Math.atan2(rcC.y - lcC.y, rcC.x - lcC.x);
       var faceCenter = { x:(lcC.x + rcC.x)/2, y:(lcC.y + rcC.y)/2 };
-      var jawBottom = jaw.reduce(function(a,p){ return p.y > a.y ? p : a; }, jaw[0]);
-      var jawBottomC = toCanvas(jawBottom);
-      var noseTip = nose[nose.length-1] || nose[0];
-      var noseTipC = toCanvas(noseTip);
 
-      drawDog(octx, {
+      var jawBottom = jaw.reduce(function(a, pt){ return pt.y > a.y ? pt : a; }, jaw[0]);
+      var noseTip = nose[nose.length-1] || nose[0];
+
+      params.push({
         faceCenter: faceCenter,
         angle: angle,
         eyeDist: eyeDist,
-        jawBottom: jawBottomC,
-        noseTip: noseTipC,
+        jawBottom: toCanvas(jawBottom),
+        noseTip: toCanvas(noseTip),
         style: style,
         sizeMult: sizeMult,
         mori: state.mori
       });
     });
+
+    smoothParams(params).forEach(function(pp){ drawDog(octx, pp); });
+  }
+
+  /* 検出結果は毎フレーム細かく揺れるので、前フレームと混ぜてガタつきを抑える */
+  function smoothParams(list){
+    var K = 0.45;
+    var next = [];
+    list.forEach(function(cur){
+      var best = null, bestD = Infinity;
+      smoothed.forEach(function(prev){
+        var d = Math.hypot(prev.faceCenter.x - cur.faceCenter.x, prev.faceCenter.y - cur.faceCenter.y);
+        if (d < bestD){ bestD = d; best = prev; }
+      });
+      if (best && bestD < cur.eyeDist * 1.8){
+        cur.faceCenter.x = best.faceCenter.x + (cur.faceCenter.x - best.faceCenter.x) * K;
+        cur.faceCenter.y = best.faceCenter.y + (cur.faceCenter.y - best.faceCenter.y) * K;
+        cur.jawBottom.x  = best.jawBottom.x  + (cur.jawBottom.x  - best.jawBottom.x)  * K;
+        cur.jawBottom.y  = best.jawBottom.y  + (cur.jawBottom.y  - best.jawBottom.y)  * K;
+        cur.noseTip.x    = best.noseTip.x    + (cur.noseTip.x    - best.noseTip.x)    * K;
+        cur.noseTip.y    = best.noseTip.y    + (cur.noseTip.y    - best.noseTip.y)    * K;
+        cur.eyeDist      = best.eyeDist      + (cur.eyeDist      - best.eyeDist)      * K;
+        var da = cur.angle - best.angle;
+        while (da >  Math.PI) da -= Math.PI * 2;
+        while (da < -Math.PI) da += Math.PI * 2;
+        cur.angle = best.angle + da * K;
+      }
+      next.push(cur);
+    });
+    smoothed = next;
+    return next;
   }
 
   function avgPoint(pts){
@@ -790,200 +845,370 @@
     return { x: sx/pts.length, y: sy/pts.length };
   }
 
-  /* ---------------- わんこ描画本体 ---------------- */
-  function rotAround(px, py, cx, cy, ang){
-    var dx = px-cx, dy = py-cy;
-    var cos = Math.cos(ang), sin = Math.sin(ang);
-    return { x: cx + dx*cos - dy*sin, y: cy + dx*sin + dy*cos };
-  }
+  /* ---------------- わんこ描画本体（顔まるごと） ---------------- */
+  var INK = "#2A1A12";
 
   function drawDog(ctx, p){
-    var s = p.style, mult = p.sizeMult, ed = p.eyeDist;
+    var s = p.style, mult = p.sizeMult, u = p.eyeDist * mult;
     var cx = p.faceCenter.x, cy = p.faceCenter.y;
-    var unit = ed * mult;
-    var headTopY = cy - unit * 1.55;
+
+    // 人の顔の長さ（目の中間→あご先）も使って頭の縦幅を決める
+    var faceLen = Math.hypot(p.jawBottom.x - cx, p.jawBottom.y - cy);
+    var rx = u * 1.42;
+    var ry = Math.max(u * 1.62, faceLen * 1.10);
+    var oy = ry * 0.30;               // 頭の中心は目のラインより少し下
 
     ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(p.angle);
+    // 以降はローカル座標（原点＝両目の中間、回転済み）
 
-    /* --- 耳（頭の傾きに合わせて回転） --- */
-    [ -1, 1 ].forEach(function(side){
-      var baseX = cx + side * unit * 0.95;
-      var baseY = headTopY + unit * 0.35;
-      var pt = rotAround(baseX, baseY, cx, cy, p.angle);
-      drawEar(ctx, pt.x, pt.y, unit, p.angle + side*0.15, side, s);
+    // 1) 耳（頭より先に描いて根元を隠す）
+    [-1, 1].forEach(function(side){
+      drawEar(ctx, side * rx * 0.72, oy - ry * 0.62 + ry * (s.droop||0) * 0.20, u, side, s);
     });
 
-    /* --- 頭頂の毛/リボン/ヘッドバンド等アクセサリ --- */
-    var crownPt = rotAround(cx, headTopY, cx, cy, p.angle);
-    if (s.accessory === "headband") drawHeadband(ctx, crownPt.x, crownPt.y, unit, p.angle, s);
-    if (s.accessory === "ribbon") drawRibbon(ctx, crownPt.x - unit*0.7, crownPt.y - unit*0.1, unit, s);
+    // 2) 頭の輪郭
+    drawHead(ctx, oy, rx, ry, s);
 
-    /* --- 鼻・舌（鼻先ランドマークに追従） --- */
-    drawSnout(ctx, p.noseTip.x, p.noseTip.y, unit, p.angle, s);
+    // 3) 顔の模様（マズル周りの明るい毛・ぶち）
+    drawMarkings(ctx, oy, rx, ry, s);
 
-    /* --- サングラス（目のライン上） --- */
-    if (s.accessory === "sunglasses") drawSunglasses(ctx, cx, cy, unit, p.angle);
-    if (s.accessory === "sleepy") drawSleepyLids(ctx, cx, cy, unit, p.angle);
+    // 4) 目と眉
+    drawEyes(ctx, u, s);
+
+    // 5) 口元（マズル・鼻・口・舌）
+    drawMuzzle(ctx, u * 0.78, u, s);
+
+    // 6) ほっぺ
+    drawBlush(ctx, u, s);
+
+    // 7) アクセサリ
+    if (s.accessory === "sunglasses") drawSunglasses(ctx, u);
+    if (s.accessory === "headband")   drawHeadband(ctx, -u * 0.68, rx * 0.92, u);
+    if (s.accessory === "ribbon")     drawRibbon(ctx, -rx * 0.60, oy - ry * 0.72, u);
 
     ctx.restore();
 
-    /* --- もりもりモード：両肩に肉球 --- */
+    // もりもりモード：両肩に肉球
     if (p.mori){
-      var shoulderY = p.jawBottom.y + unit*0.9;
-      [ -1, 1 ].forEach(function(side){
-        var sx = cx + side*unit*1.6;
-        drawPaw(ctx, sx, shoulderY, unit*0.55, s);
+      var shoulderY = p.jawBottom.y + u * 1.05;
+      [-1, 1].forEach(function(side){
+        drawPaw(ctx, cx + side * u * 1.9, shoulderY, u * 0.6, s);
       });
     }
   }
 
-  function drawEar(ctx, x, y, u, ang, side, s){
+  /* 頭の輪郭パス（頭頂は丸く、あご側はすこし細い卵形） */
+  function headPath(ctx, rx, ry){
+    ctx.beginPath();
+    ctx.moveTo(0, -ry);
+    ctx.bezierCurveTo( rx*1.00, -ry*0.95,  rx*1.12, -ry*0.05,  rx*0.70, ry*0.60);
+    ctx.bezierCurveTo( rx*0.44,  ry*1.02, -rx*0.44,  ry*1.02, -rx*0.70, ry*0.60);
+    ctx.bezierCurveTo(-rx*1.12, -ry*0.05, -rx*1.00, -ry*0.95,  0,      -ry);
+    ctx.closePath();
+  }
+
+  function drawHead(ctx, oy, rx, ry, s){
     ctx.save();
-    ctx.translate(x,y);
-    ctx.rotate(ang);
-    var w = u*0.62, h = u*(s.fluffy? 1.05 : 0.95);
-    var droop = s.droop || 0;
-    ctx.rotate(side * droop);
+    ctx.translate(0, oy);
+
+    // ふわもこスタイルは輪郭のまわりに毛先を出す
+    if (s.fluffy){
+      var n = 16;
+      ctx.beginPath();
+      for (var i = 0; i < n; i++){
+        var t0 = -Math.PI/2 + (i / n) * Math.PI * 2;
+        var t1 = -Math.PI/2 + ((i + 1) / n) * Math.PI * 2;
+        var tm = (t0 + t1) / 2;
+        if (i === 0) ctx.moveTo(Math.cos(t0) * rx, Math.sin(t0) * ry);
+        ctx.quadraticCurveTo(Math.cos(tm) * rx * 1.20, Math.sin(tm) * ry * 1.20,
+                             Math.cos(t1) * rx, Math.sin(t1) * ry);
+      }
+      ctx.closePath();
+      ctx.fillStyle = s.furTip || s.ear;
+      ctx.fill();
+    }
+
+    headPath(ctx, rx, ry);
+    ctx.shadowColor = "rgba(0,0,0,0.28)";
+    ctx.shadowBlur = rx * 0.16;
+    ctx.shadowOffsetY = rx * 0.05;
+    ctx.fillStyle = s.ear;
+    ctx.fill();
+    ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
+
+    // 頭頂の濃いめの毛
+    ctx.save();
+    ctx.beginPath();
+    headPath(ctx, rx, ry);
+    ctx.clip();
+    ctx.globalAlpha = 0.35;
+    ctx.fillStyle = s.furTip || s.ear;
+    ctx.beginPath();
+    ctx.ellipse(0, -ry * 0.92, rx * 0.78, ry * 0.34, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.restore();
+
+    ctx.restore();
+  }
+
+  function drawMarkings(ctx, oy, rx, ry, s){
+    ctx.save();
+    ctx.translate(0, oy);
+    ctx.beginPath();
+    headPath(ctx, rx, ry);
+    ctx.clip();
+
+    // 口元まわりの明るい毛
+    ctx.fillStyle = s.earIn;
+    ctx.globalAlpha = 0.95;
+    ctx.beginPath();
+    ctx.ellipse(0, ry * 0.34, rx * 0.74, ry * 0.56, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // ぶちわんの模様
+    if (s.spotted){
+      ctx.globalAlpha = 0.92;
+      ctx.fillStyle = "#FFFFFF";
+      ctx.beginPath();
+      ctx.ellipse(-rx * 0.62, -ry * 0.30, rx * 0.42, ry * 0.34, 0.4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    ctx.restore();
+
+    // 柴犬っぽい眉毛
+    if (!s.fluffy){
+      ctx.save();
+      ctx.globalAlpha = 0.85;
+      ctx.fillStyle = s.earIn;
+      [-1, 1].forEach(function(side){
+        ctx.beginPath();
+        ctx.ellipse(side * rx * 0.42, -ry * 0.20, rx * 0.16, ry * 0.09, side * 0.25, 0, Math.PI * 2);
+        ctx.fill();
+      });
+      ctx.globalAlpha = 1;
+      ctx.restore();
+    }
+  }
+
+  function drawEar(ctx, x, y, u, side, s){
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(side * (0.30 + (s.droop || 0) * 1.7));
+    var w = u * 0.62, h = u * (s.fluffy ? 1.25 : 1.12);
 
     ctx.beginPath();
-    ctx.moveTo(0,0);
-    ctx.bezierCurveTo(-w*0.9, -h*0.3, -w*0.55, -h*1.05, side*w*0.05, -h*1.2);
-    ctx.bezierCurveTo(w*0.6, -h*1.0, w*0.85, -h*0.25, 0,0);
+    ctx.moveTo(0, h * 0.20);
+    ctx.bezierCurveTo(-w * 0.95, -h * 0.20, -w * 0.60, -h * 0.95, side * w * 0.06, -h * 1.05);
+    ctx.bezierCurveTo( w * 0.66, -h * 0.90,  w * 0.92, -h * 0.15, 0, h * 0.20);
     ctx.closePath();
     ctx.fillStyle = s.ear;
-    ctx.shadowColor = "rgba(0,0,0,0.25)";
-    ctx.shadowBlur = u*0.08;
+    ctx.shadowColor = "rgba(0,0,0,0.22)";
+    ctx.shadowBlur = u * 0.10;
     ctx.fill();
     ctx.shadowBlur = 0;
 
-    // 内側の毛色
+    // 耳の内側
     ctx.beginPath();
-    ctx.moveTo(0,-h*0.05);
-    ctx.bezierCurveTo(-w*0.5, -h*0.35, -w*0.32, -h*0.8, side*w*0.03, -h*0.92);
-    ctx.bezierCurveTo(w*0.36, -h*0.78, w*0.5, -h*0.32, 0,-h*0.05);
+    ctx.moveTo(0, h * 0.05);
+    ctx.bezierCurveTo(-w * 0.55, -h * 0.22, -w * 0.34, -h * 0.72, side * w * 0.04, -h * 0.82);
+    ctx.bezierCurveTo( w * 0.38, -h * 0.68,  w * 0.54, -h * 0.18, 0, h * 0.05);
     ctx.closePath();
     ctx.fillStyle = s.earIn;
+    ctx.globalAlpha = 0.9;
     ctx.fill();
-
-    if (s.spotted){
-      ctx.fillStyle = "rgba(255,255,255,0.85)";
-      ctx.beginPath(); ctx.ellipse(-w*0.15, -h*0.55, w*0.14, h*0.1, 0.3, 0, Math.PI*2); ctx.fill();
-    }
+    ctx.globalAlpha = 1;
     ctx.restore();
   }
 
-  function drawSnout(ctx, x, y, u, ang, s){
-    ctx.save();
-    ctx.translate(x,y);
-    ctx.rotate(ang);
-    var w = u*0.42, h = u*0.3;
+  function drawEyes(ctx, u, s){
+    var ex = u * 0.54, r = u * 0.21;
+    var sleepy = (s.accessory === "sleepy");
 
+    [-1, 1].forEach(function(side){
+      var x = side * ex;
+
+      if (sleepy){
+        ctx.strokeStyle = INK;
+        ctx.lineWidth = Math.max(2, u * 0.055);
+        ctx.lineCap = "round";
+        ctx.beginPath();
+        ctx.moveTo(x - r, -r * 0.1);
+        ctx.quadraticCurveTo(x, r * 0.85, x + r, -r * 0.1);
+        ctx.stroke();
+        return;
+      }
+
+      // 白目
+      ctx.beginPath();
+      ctx.ellipse(x, 0, r * 1.02, r * 1.12, 0, 0, Math.PI * 2);
+      ctx.fillStyle = "#FFFDF8";
+      ctx.fill();
+      // 黒目
+      ctx.beginPath();
+      ctx.ellipse(x, r * 0.06, r * 0.70, r * 0.86, 0, 0, Math.PI * 2);
+      ctx.fillStyle = INK;
+      ctx.fill();
+      // ハイライト
+      ctx.beginPath();
+      ctx.ellipse(x - r * 0.26, -r * 0.34, r * 0.24, r * 0.20, -0.35, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(255,255,255,0.95)";
+      ctx.fill();
+    });
+  }
+
+  function drawMuzzle(ctx, y, u, s){
+    ctx.save();
+    ctx.translate(0, y);
+    var mw = u * 0.80, mh = u * 0.52;
+
+    // マズルのふくらみ（左右）
+    ctx.fillStyle = s.earIn;
+    [-1, 1].forEach(function(side){
+      ctx.beginPath();
+      ctx.ellipse(side * mw * 0.40, mh * 0.34, mw * 0.60, mh * 0.54, 0, 0, Math.PI * 2);
+      ctx.fill();
+    });
+
+    // 舌（口ラインより先に描く）
     ctx.beginPath();
-    ctx.ellipse(0, h*0.05, w, h, 0, 0, Math.PI*2);
-    ctx.fillStyle = s.furTip || s.ear;
-    ctx.globalAlpha = 0.94;
+    ctx.moveTo(-mw * 0.26, mh * 0.50);
+    ctx.bezierCurveTo(-mw * 0.30, mh * 1.45, mw * 0.30, mh * 1.45, mw * 0.26, mh * 0.50);
+    ctx.closePath();
+    ctx.fillStyle = "#F08095";
     ctx.fill();
-    ctx.globalAlpha = 1;
+    ctx.strokeStyle = "rgba(180,70,95,0.55)";
+    ctx.lineWidth = Math.max(1, u * 0.016);
+    ctx.beginPath();
+    ctx.moveTo(0, mh * 0.72);
+    ctx.lineTo(0, mh * 1.20);
+    ctx.stroke();
 
     // 鼻
     ctx.beginPath();
-    ctx.ellipse(0, -h*0.35, w*0.34, h*0.32, 0, 0, Math.PI*2);
-    ctx.fillStyle = "#2A1A12";
+    ctx.moveTo(-mw * 0.34, -mh * 0.40);
+    ctx.quadraticCurveTo(0, -mh * 0.76, mw * 0.34, -mh * 0.40);
+    ctx.quadraticCurveTo(mw * 0.30, mh * 0.10, 0, mh * 0.18);
+    ctx.quadraticCurveTo(-mw * 0.30, mh * 0.10, -mw * 0.34, -mh * 0.40);
+    ctx.closePath();
+    ctx.fillStyle = INK;
     ctx.fill();
+    // 鼻のツヤ
     ctx.beginPath();
-    ctx.ellipse(-w*0.12,-h*0.42, w*0.08, h*0.1, 0.3, 0, Math.PI*2);
-    ctx.fillStyle = "rgba(255,255,255,0.5)";
+    ctx.ellipse(-mw * 0.12, -mh * 0.42, mw * 0.09, mh * 0.09, 0.3, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(255,255,255,0.55)";
     ctx.fill();
 
-    // 口ライン
-    ctx.strokeStyle = "#2A1A12";
-    ctx.lineWidth = Math.max(1.5, u*0.02);
+    // 口（W字）
+    ctx.strokeStyle = INK;
+    ctx.lineWidth = Math.max(1.6, u * 0.032);
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
     ctx.beginPath();
-    ctx.moveTo(0, -h*0.1);
-    ctx.lineTo(0, h*0.35);
-    ctx.quadraticCurveTo(-w*0.4, h*0.55, -w*0.55, h*0.3);
-    ctx.moveTo(0, h*0.35);
-    ctx.quadraticCurveTo(w*0.4, h*0.55, w*0.55, h*0.3);
+    ctx.moveTo(0, mh * 0.18);
+    ctx.lineTo(0, mh * 0.52);
+    ctx.moveTo(0, mh * 0.52);
+    ctx.quadraticCurveTo(-mw * 0.34, mh * 0.92, -mw * 0.66, mh * 0.42);
+    ctx.moveTo(0, mh * 0.52);
+    ctx.quadraticCurveTo( mw * 0.34, mh * 0.92,  mw * 0.66, mh * 0.42);
     ctx.stroke();
 
+    // ヒゲの点
+    ctx.fillStyle = "rgba(42,26,18,0.45)";
+    [-1, 1].forEach(function(side){
+      [0, 1, 2].forEach(function(i){
+        ctx.beginPath();
+        ctx.arc(side * mw * (0.42 + i * 0.14), mh * (0.02 + i * 0.16), Math.max(1, u * 0.014), 0, Math.PI * 2);
+        ctx.fill();
+      });
+    });
+
     ctx.restore();
   }
 
-  function drawSunglasses(ctx, cx, cy, u, ang){
+  function drawBlush(ctx, u, s){
     ctx.save();
-    ctx.translate(cx,cy);
-    ctx.rotate(ang);
-    var w = u*0.5, h = u*0.28, gap = u*0.18;
-    ctx.fillStyle = "rgba(20,20,20,0.88)";
-    [-1,1].forEach(function(side){
+    ctx.globalAlpha = 0.35;
+    ctx.fillStyle = "#FF8C8C";
+    [-1, 1].forEach(function(side){
       ctx.beginPath();
-      ctx.ellipse(side*(gap+w/2), 0, w/2, h/2, 0, 0, Math.PI*2);
+      ctx.ellipse(side * u * 1.08, u * 0.46, u * 0.26, u * 0.17, 0, 0, Math.PI * 2);
       ctx.fill();
     });
-    ctx.strokeStyle = "#222"; ctx.lineWidth = u*0.03;
+    ctx.restore();
+  }
+
+  /* ---- アクセサリ（すべてローカル座標・回転済み） ---- */
+  function drawSunglasses(ctx, u){
+    ctx.save();
+    var w = u * 0.62, h = u * 0.44, gap = u * 0.10;
+    ctx.fillStyle = "rgba(20,20,20,0.9)";
+    [-1, 1].forEach(function(side){
+      ctx.beginPath();
+      ctx.ellipse(side * (gap + w / 2), 0, w / 2, h / 2, 0, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    ctx.strokeStyle = "#222";
+    ctx.lineWidth = u * 0.05;
     ctx.beginPath(); ctx.moveTo(-gap, 0); ctx.lineTo(gap, 0); ctx.stroke();
     ctx.beginPath();
-    ctx.ellipse(-w*0.75-gap, -h*0.15, w*0.14, h*0.1, -0.3, 0, Math.PI*2);
-    ctx.fillStyle="rgba(255,255,255,0.35)"; ctx.fill();
-    ctx.restore();
-  }
-
-  function drawSleepyLids(ctx, cx, cy, u, ang){
-    ctx.save();
-    ctx.translate(cx,cy);
-    ctx.rotate(ang);
-    ctx.strokeStyle = "#4A2C1D"; ctx.lineWidth = Math.max(2,u*0.035);
-    ctx.lineCap = "round";
-    [-1,1].forEach(function(side){
-      ctx.beginPath();
-      ctx.moveTo(side*u*0.22, -u*0.02);
-      ctx.quadraticCurveTo(side*u*0.42, u*0.08, side*u*0.58, -u*0.02);
-      ctx.stroke();
-    });
-    ctx.restore();
-  }
-
-  function drawHeadband(ctx, x, y, u, ang, s){
-    ctx.save();
-    ctx.translate(x,y);
-    ctx.rotate(ang);
-    ctx.fillStyle = "#3B2A20";
-    ctx.fillRect(-u*1.05, -u*0.14, u*2.1, u*0.24);
-    ctx.fillStyle = "#C0392B";
-    ctx.beginPath();
-    ctx.moveTo(u*1.05,-u*0.02); ctx.lineTo(u*1.4,-u*0.16); ctx.lineTo(u*1.32, u*0.05); ctx.lineTo(u*1.4, u*0.2); ctx.closePath();
+    ctx.ellipse(-gap - w * 0.72, -h * 0.18, w * 0.16, h * 0.11, -0.3, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(255,255,255,0.4)";
     ctx.fill();
     ctx.restore();
   }
 
-  function drawRibbon(ctx, x, y, u, s){
+  function drawHeadband(ctx, y, rx, u){
     ctx.save();
-    ctx.translate(x,y);
+    ctx.translate(0, y);
+    ctx.fillStyle = "#3B2A20";
+    ctx.fillRect(-rx * 1.02, -u * 0.14, rx * 2.04, u * 0.26);
+    ctx.fillStyle = "#C0392B";
+    ctx.beginPath();
+    ctx.moveTo(rx * 1.0, -u * 0.02);
+    ctx.lineTo(rx * 1.0 + u * 0.5, -u * 0.20);
+    ctx.lineTo(rx * 1.0 + u * 0.4,  u * 0.04);
+    ctx.lineTo(rx * 1.0 + u * 0.5,  u * 0.26);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function drawRibbon(ctx, x, y, u){
+    ctx.save();
+    ctx.translate(x, y);
     ctx.fillStyle = "#E8628A";
-    [-1,1].forEach(function(side){
+    [-1, 1].forEach(function(side){
       ctx.beginPath();
-      ctx.moveTo(0,0);
-      ctx.quadraticCurveTo(side*u*0.35, -u*0.28, side*u*0.5, u*0.02);
-      ctx.quadraticCurveTo(side*u*0.3, u*0.18, 0,0);
-      ctx.closePath(); ctx.fill();
+      ctx.moveTo(0, 0);
+      ctx.quadraticCurveTo(side * u * 0.5, -u * 0.4, side * u * 0.7, u * 0.03);
+      ctx.quadraticCurveTo(side * u * 0.42, u * 0.26, 0, 0);
+      ctx.closePath();
+      ctx.fill();
     });
-    ctx.beginPath(); ctx.arc(0,0,u*0.1,0,Math.PI*2);
-    ctx.fillStyle="#C2416B"; ctx.fill();
+    ctx.beginPath();
+    ctx.arc(0, 0, u * 0.13, 0, Math.PI * 2);
+    ctx.fillStyle = "#C2416B";
+    ctx.fill();
     ctx.restore();
   }
 
   function drawPaw(ctx, x, y, r, s){
     ctx.save();
-    ctx.translate(x,y);
+    ctx.translate(x, y);
     ctx.fillStyle = s.ear;
     ctx.globalAlpha = 0.92;
-    ctx.beginPath(); ctx.ellipse(0, r*0.2, r*0.55, r*0.42, 0, 0, Math.PI*2); ctx.fill();
-    [ [-0.55,-0.55],[-0.18,-0.85],[0.18,-0.85],[0.55,-0.55] ].forEach(function(o){
+    ctx.beginPath(); ctx.ellipse(0, r * 0.2, r * 0.55, r * 0.42, 0, 0, Math.PI * 2); ctx.fill();
+    [[-0.55,-0.55],[-0.18,-0.85],[0.18,-0.85],[0.55,-0.55]].forEach(function(o){
       ctx.beginPath(); ctx.ellipse(o[0]*r, o[1]*r*0.6, r*0.22, r*0.28, 0, 0, Math.PI*2); ctx.fill();
     });
     ctx.globalAlpha = 1;
     ctx.restore();
   }
+
 
   /* ---------------- 撮影 ---------------- */
   $("shutter-btn").addEventListener("click", takePhoto);
@@ -1004,10 +1229,14 @@
     cctx.restore();
 
     if (!state.saveRaw){
-      // オーバーレイ座標は overlay(表示解像度)基準なので実サイズへスケール
-      var sx = vw / overlay.width, sy = vh / overlay.height;
+      // オーバーレイは「画面に表示されている見え方」の座標系なので、
+      // cover 表示の拡大・余白を打ち消して映像の座標系へ戻す
+      var scale = Math.max(overlay.width / vw, overlay.height / vh);
+      var offX = (overlay.width  - vw * scale) / 2;
+      var offY = (overlay.height - vh * scale) / 2;
       cctx.save();
-      cctx.scale(sx, sy);
+      cctx.scale(1 / scale, 1 / scale);
+      cctx.translate(-offX, -offY);
       cctx.drawImage(overlay, 0, 0);
       cctx.restore();
     }
