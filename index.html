@@ -1,0 +1,1108 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>わんこカメラ - 頭にわんこ</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Yusei+Magic&family=Zen+Maru+Gothic:wght@500;700;900&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --cream:#FFF8EF;
+    --cream-deep:#FBEFDD;
+    --blush:#FFB6A3;
+    --fur:#C97B4F;
+    --fur-deep:#8B5A3C;
+    --choco:#4A2C1D;
+    --mint:#6FCDB8;
+    --mustard:#F2B705;
+    --shadow: 0 8px 20px rgba(74,44,29,0.25);
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{
+    margin:0; padding:0; width:100%; height:100%;
+    background:var(--choco);
+    font-family:'Zen Maru Gothic', sans-serif;
+    overscroll-behavior:none;
+    touch-action:none;
+    user-select:none;
+  }
+  #app{
+    position:fixed; inset:0;
+    display:flex; flex-direction:column;
+    background:#000;
+  }
+  #camera-stage{
+    position:relative; flex:1; overflow:hidden;
+    background:#111;
+    display:flex; align-items:center; justify-content:center;
+  }
+  #camera-wrap{
+    position:absolute; inset:0;
+    transform-origin:center center;
+    transition:transform .12s ease-out;
+  }
+  #video, #overlay{
+    position:absolute; inset:0;
+    width:100%; height:100%;
+    object-fit:cover;
+  }
+  #video.mirror{ transform:scaleX(-1); }
+  #overlay{ pointer-events:none; }
+
+  #flash-flare{
+    position:absolute; inset:0; background:#fff; opacity:0;
+    pointer-events:none; z-index:50;
+  }
+  #flash-flare.on{ animation:flare .28s ease-out; }
+  @keyframes flare{ 0%{opacity:.95;} 100%{opacity:0;} }
+
+  /* --- 上部バー --- */
+  #topbar{
+    position:absolute; top:0; left:0; right:0;
+    display:flex; align-items:center; justify-content:space-between;
+    padding:calc(env(safe-area-inset-top,0px) + 10px) 14px 10px;
+    z-index:20;
+    pointer-events:none;
+  }
+  #topbar button{ pointer-events:auto; }
+  .pill-btn{
+    background:rgba(74,44,29,0.55);
+    border:1.5px solid rgba(255,248,239,0.5);
+    color:var(--cream);
+    border-radius:999px;
+    padding:9px 14px;
+    font-family:'Zen Maru Gothic', sans-serif;
+    font-weight:700;
+    font-size:13px;
+    display:flex; align-items:center; gap:5px;
+    backdrop-filter:blur(6px);
+  }
+  .pill-btn.active{ background:var(--mustard); color:var(--choco); border-color:var(--mustard); }
+
+  #brandmark{
+    position:absolute; left:50%; top:calc(env(safe-area-inset-top,0px) + 12px);
+    transform:translateX(-50%);
+    font-family:'Yusei Magic', cursive;
+    color:var(--cream);
+    font-size:15px;
+    letter-spacing:.03em;
+    text-shadow:0 2px 8px rgba(0,0,0,.5);
+    pointer-events:none;
+    z-index:20;
+  }
+
+  #loading{
+    position:absolute; inset:0; z-index:60;
+    background:var(--cream);
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:14px;
+    transition:opacity .4s ease;
+  }
+  #loading.hide{ opacity:0; pointer-events:none; }
+  #loading .paw-spin{
+    width:56px; height:56px;
+    border-radius:50%;
+    border:6px solid var(--cream-deep);
+    border-top-color:var(--fur-deep);
+    animation:spin 0.9s linear infinite;
+  }
+  @keyframes spin{ to{ transform:rotate(360deg); } }
+  #loading p{ font-family:'Yusei Magic', cursive; color:var(--fur-deep); font-size:15px; margin:0; }
+  #loading small{ color:var(--choco); opacity:.6; font-size:12px; }
+
+  #toast{
+    position:absolute; left:50%; bottom:210px; transform:translateX(-50%) translateY(10px);
+    background:var(--choco); color:var(--cream);
+    padding:10px 18px; border-radius:16px;
+    font-size:13px; font-weight:700;
+    opacity:0; transition:all .25s ease;
+    z-index:40; pointer-events:none;
+    white-space:nowrap;
+    box-shadow:var(--shadow);
+  }
+  #toast.show{ opacity:1; transform:translateX(-50%) translateY(0); }
+
+  #no-face-hint{
+    position:absolute; left:50%; top:18%; transform:translateX(-50%);
+    background:rgba(74,44,29,0.55); color:var(--cream);
+    padding:8px 16px; border-radius:14px; font-size:12.5px; font-weight:700;
+    backdrop-filter:blur(4px); z-index:15; opacity:0; transition:opacity .3s;
+    text-align:center; pointer-events:none;
+  }
+  #no-face-hint.show{ opacity:1; }
+
+  /* --- 下部コントロール --- */
+  #controls{
+    position:relative; z-index:20;
+    background:linear-gradient(180deg, rgba(74,44,29,0) 0%, var(--choco) 28%);
+    padding:14px 0 calc(env(safe-area-inset-bottom,0px) + 14px);
+    display:flex; flex-direction:column; gap:10px;
+  }
+
+  #style-carousel{
+    display:flex; gap:10px; overflow-x:auto; padding:2px 16px 6px;
+    scrollbar-width:none;
+  }
+  #style-carousel::-webkit-scrollbar{ display:none; }
+  .style-chip{
+    flex:0 0 auto; width:58px;
+    display:flex; flex-direction:column; align-items:center; gap:4px;
+    opacity:.65; transition:opacity .15s, transform .15s;
+  }
+  .style-chip.active{ opacity:1; transform:translateY(-3px); }
+  .style-chip .swatch{
+    width:48px; height:48px; border-radius:50%;
+    display:flex; align-items:center; justify-content:center;
+    border:3px solid rgba(255,248,239,0.15);
+  }
+  .style-chip.active .swatch{ border-color:var(--mustard); }
+  .style-chip span{
+    font-size:10.5px; color:var(--cream); font-weight:700;
+  }
+
+  #row-main{
+    display:flex; align-items:center; justify-content:center;
+    gap:26px; padding:2px 20px;
+  }
+  #row-secondary{
+    display:flex; align-items:center; justify-content:center;
+    gap:10px; padding:0 20px;
+    flex-wrap:wrap;
+  }
+
+  .side-btn{
+    width:52px; height:52px; border-radius:50%;
+    background:rgba(255,248,239,0.14);
+    border:1.5px solid rgba(255,248,239,0.35);
+    color:var(--cream);
+    font-size:11px; font-weight:700;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:1px;
+  }
+  .side-btn.active{ background:var(--mint); color:var(--choco); border-color:var(--mint); }
+  .side-btn svg{ width:20px; height:20px; }
+
+  #shutter-btn{
+    width:78px; height:78px; border-radius:50%;
+    background:var(--cream);
+    border:5px solid var(--fur-deep);
+    box-shadow:var(--shadow);
+    display:flex; align-items:center; justify-content:center;
+    position:relative;
+  }
+  #shutter-btn:active{ transform:scale(.92); }
+  #shutter-btn .paw{
+    width:34px; height:34px;
+  }
+
+  .mini-pill{
+    background:rgba(255,248,239,0.14);
+    border:1.5px solid rgba(255,248,239,0.35);
+    color:var(--cream);
+    border-radius:999px; padding:7px 13px;
+    font-size:12px; font-weight:700;
+    display:flex; align-items:center; gap:6px;
+  }
+  .mini-pill.active{ background:var(--blush); color:var(--choco); border-color:var(--blush); }
+
+  #zoom-row{
+    display:flex; align-items:center; gap:10px;
+    padding:0 24px 2px;
+  }
+  #zoom-row span{ color:var(--cream); font-size:11px; font-weight:700; width:32px; }
+  #zoom-row input[type=range]{
+    flex:1; accent-color:var(--mustard); height:22px;
+  }
+
+  /* --- 撮影結果モーダル --- */
+  #result-modal{
+    position:fixed; inset:0; z-index:80;
+    background:rgba(20,12,8,0.92);
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:18px; padding:20px;
+  }
+  #result-modal[hidden]{ display:none; }
+  #result-img{
+    max-width:min(88vw, 420px); max-height:62vh;
+    border-radius:18px; box-shadow:0 12px 30px rgba(0,0,0,.5);
+    border:4px solid var(--cream);
+  }
+  #result-actions{ display:flex; gap:12px; }
+  .big-btn{
+    font-family:'Zen Maru Gothic', sans-serif;
+    font-weight:900; font-size:14.5px;
+    padding:13px 22px; border-radius:999px; border:none;
+  }
+  .big-btn.primary{ background:var(--mustard); color:var(--choco); }
+  .big-btn.ghost{ background:transparent; color:var(--cream); border:1.5px solid rgba(255,248,239,0.5); }
+  #result-cap{ color:var(--cream); font-family:'Yusei Magic',cursive; font-size:14px; text-align:center; }
+
+  #start-screen{
+    position:fixed; inset:0; z-index:90;
+    background:var(--cream);
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    text-align:center; padding:32px;
+    gap:16px;
+  }
+  #start-screen[hidden]{ display:none; }
+  #start-screen h1{
+    font-family:'Yusei Magic', cursive;
+    color:var(--fur-deep); font-size:26px; margin:0;
+  }
+  #start-screen p{ color:var(--choco); font-size:13.5px; line-height:1.7; max-width:320px; margin:0; opacity:.85;}
+  #start-btn{
+    margin-top:10px;
+    background:var(--fur-deep); color:var(--cream);
+    font-family:'Zen Maru Gothic'; font-weight:900; font-size:16px;
+    padding:15px 34px; border-radius:999px; border:none;
+    box-shadow:var(--shadow);
+  }
+  #start-emoji{ font-size:52px; }
+
+  /* --- 許可ステータス表示 --- */
+  #permission-note{
+    display:flex; align-items:center; gap:6px;
+    background:var(--cream-deep); color:var(--fur-deep);
+    border-radius:999px; padding:6px 14px; font-size:12px; font-weight:700;
+  }
+  #permission-note.state-denied{ background:#FBDCD4; color:#B23B2B; }
+  #permission-note.state-checking{ opacity:.7; }
+
+  /* --- カメラ許可拒否時の案内画面 --- */
+  #permission-screen{
+    position:fixed; inset:0; z-index:95;
+    background:var(--cream);
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    text-align:center; padding:32px; gap:14px;
+  }
+  #permission-screen[hidden]{ display:none; }
+  #permission-screen h2{
+    font-family:'Yusei Magic', cursive; color:#B23B2B; font-size:20px; margin:0;
+  }
+  #permission-screen p{ color:var(--choco); font-size:13px; line-height:1.7; max-width:320px; margin:0; opacity:.9; }
+  #permission-steps{
+    text-align:left; background:var(--cream-deep); border-radius:14px;
+    padding:14px 18px; max-width:320px; font-size:12.5px; color:var(--choco);
+    line-height:1.9;
+  }
+  #permission-steps ol{ margin:0; padding-left:18px; }
+  #permission-retry-btn{
+    background:var(--fur-deep); color:var(--cream);
+    font-family:'Zen Maru Gothic'; font-weight:900; font-size:15px;
+    padding:13px 30px; border-radius:999px; border:none;
+    box-shadow:var(--shadow);
+  }
+  #permission-emoji{ font-size:44px; }
+
+  /* --- 保存の同意モーダル --- */
+  #save-consent-modal{
+    position:fixed; inset:0; z-index:85;
+    background:rgba(20,12,8,0.92);
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:16px; padding:28px; text-align:center;
+  }
+  #save-consent-modal[hidden]{ display:none; }
+  #save-consent-modal h3{
+    font-family:'Yusei Magic', cursive; color:var(--cream); font-size:18px; margin:0;
+  }
+  #save-consent-modal p{ color:var(--cream); opacity:.85; font-size:13px; line-height:1.7; max-width:300px; margin:0; }
+  #save-method-note{
+    background:rgba(255,248,239,0.12); color:var(--cream);
+    border-radius:12px; padding:10px 14px; font-size:12px; max-width:300px; line-height:1.6;
+  }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- 起動画面 -->
+  <div id="start-screen">
+    <div id="start-emoji">🐾</div>
+    <h1>わんこカメラ</h1>
+    <p>頭を見つけたら、すかさずわんこを乗せます。<br>
+      傾きにぴったり合わせて乗るので、無駄に精巧です。<br>
+      カメラへのアクセスを許可してはじめてください。<br>
+      撮影データは端末の外へは送信されません。</p>
+    <button id="start-btn">カメラへのアクセスを許可</button>
+    <div id="permission-note" class="state-checking">🔍 許可状況を確認中…</div>
+  </div>
+
+  <!-- カメラ許可が拒否された場合の案内画面 -->
+  <div id="permission-screen" hidden>
+    <div id="permission-emoji">🚫🐾</div>
+    <h2>カメラを使えませんでした</h2>
+    <p id="permission-reason">カメラへのアクセスが許可されていないため、わんこを乗せられません。設定からカメラを許可すると使えるようになります。</p>
+    <div id="permission-steps"></div>
+    <button id="permission-retry-btn">もう一度試す</button>
+  </div>
+
+  <div id="camera-stage">
+    <div id="camera-wrap">
+      <video id="video" playsinline autoplay muted></video>
+      <canvas id="overlay"></canvas>
+    </div>
+    <div id="flash-flare"></div>
+    <div id="no-face-hint">わんこの家を探しています…頭を画面に入れてね</div>
+  </div>
+
+  <div id="topbar">
+    <button id="flip-btn" class="pill-btn">🔄 前後</button>
+    <button id="torch-btn" class="pill-btn">💡 フラッシュ</button>
+  </div>
+  <div id="brandmark">わんこカメラ</div>
+
+  <div id="loading">
+    <div class="paw-spin"></div>
+    <p>わんこを準備中…</p>
+    <small id="loading-detail">モデルを読み込んでいます</small>
+  </div>
+
+  <div id="toast"></div>
+
+  <div id="controls">
+    <div id="style-carousel"></div>
+
+    <div id="zoom-row">
+      <span>🔍1x</span>
+      <input id="zoom-slider" type="range" min="1" max="3" step="0.1" value="1">
+      <span>3x</span>
+    </div>
+
+    <div id="row-secondary">
+      <button id="size-btn" class="mini-pill">サイズ：中</button>
+      <button id="mori-btn" class="mini-pill">もりもり：OFF</button>
+      <button id="save-method-btn" class="mini-pill">保存方法：共有</button>
+    </div>
+
+    <div id="row-main">
+      <button id="save-toggle-btn" class="side-btn" title="保存モード">📷<span>直撮り</span></button>
+      <button id="shutter-btn">
+        <svg class="paw" viewBox="0 0 64 64" fill="#8B5A3C">
+          <ellipse cx="32" cy="40" rx="16" ry="13"/>
+          <ellipse cx="14" cy="20" rx="7" ry="9"/>
+          <ellipse cx="32" cy="12" rx="7" ry="9"/>
+          <ellipse cx="50" cy="20" rx="7" ry="9"/>
+          <ellipse cx="22" cy="10" rx="6" ry="8" transform="rotate(-20 22 10)" opacity="0"/>
+        </svg>
+      </button>
+      <button id="mirror-info-btn" class="side-btn" title="情報">ℹ️<span>情報</span></button>
+    </div>
+  </div>
+
+  <div id="result-modal" hidden>
+    <div id="result-cap">わん！撮れました</div>
+    <img id="result-img" alt="撮影結果">
+    <div id="result-actions">
+      <button id="download-btn" class="big-btn primary">保存する</button>
+      <button id="retake-btn" class="big-btn ghost">もう一度</button>
+    </div>
+  </div>
+
+  <!-- 写真の保存方法についての事前案内（初回のみ表示） -->
+  <div id="save-consent-modal" hidden>
+    <div id="permission-emoji">📁🐾</div>
+    <h3>写真を保存します</h3>
+    <p id="save-consent-text">この後に出てくる画面で「画像を保存」または「写真に追加」を選ぶと、端末の写真アプリに保存されます。</p>
+    <div id="save-method-note"></div>
+    <div id="result-actions">
+      <button id="save-consent-confirm-btn" class="big-btn primary">保存に進む</button>
+      <button id="save-consent-cancel-btn" class="big-btn ghost">キャンセル</button>
+    </div>
+  </div>
+
+</div>
+
+<!-- face-api.js（顔検出・顔ランドマーク検出） -->
+<script defer src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+<script>
+(function(){
+  "use strict";
+
+  var MODEL_URL = "https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@master/weights";
+
+  /* ------------------------------------------------------------------
+   * わんこスタイル定義（うんこカメラの「23種のキャラクター」へのオマージュとして
+   * 犬種／気分／小物のバリエーションを用意。すべて自前のcanvas描画で、
+   * 既存キャラクターの画像は一切使用しない）
+   * ---------------------------------------------------------------- */
+  var STYLES = [
+    { id:"shiba",  name:"しばわん",   ear:"#D98E4B", earIn:"#F6DDB8", furTip:"#B8703A", accessory:null,        droop:0.0  },
+    { id:"kuro",   name:"くろわん",   ear:"#3B2A20", earIn:"#5C4433", furTip:"#241812", accessory:null,        droop:0.35 },
+    { id:"buchi",  name:"ぶちわん",   ear:"#2B2B2B", earIn:"#FFFFFF", furTip:"#111111", accessory:null,        droop:0.15, spotted:true },
+    { id:"nemu",   name:"ねむねむ",   ear:"#C9A27E", earIn:"#EBD3B3", furTip:"#A9835F", accessory:"sleepy",    droop:0.55 },
+    { id:"sun",    name:"サンわん",   ear:"#8B5A3C", earIn:"#C99568", furTip:"#5C3A22", accessory:"sunglasses",droop:0.1  },
+    { id:"ninja",  name:"にんじゃ",   ear:"#4A2C1D", earIn:"#6B4530", furTip:"#2C1A10", accessory:"headband",  droop:0.05 },
+    { id:"hime",   name:"おひめさま", ear:"#F2B5C4", earIn:"#FDE0E8", furTip:"#E191A8", accessory:"ribbon",    droop:0.2  },
+    { id:"fuwa",   name:"ふわもこ",   ear:"#FFFFFF", earIn:"#F5EFE4", furTip:"#E4DCCB", accessory:null,        droop:0.25, fluffy:true }
+  ];
+  var SIZES = [ {key:"small", label:"小", mult:0.78}, {key:"mid", label:"中", mult:1.0}, {key:"large", label:"大", mult:1.32} ];
+
+  var state = {
+    styleIndex: 0,
+    sizeIndex: 1,
+    mori: false,
+    facing: "user",
+    zoom: 1,
+    modelsReady: false,
+    stream: null,
+    detecting: false,
+    lastDetections: [],
+    torchOn: false,
+    saveRaw: false,
+    saveMethod: "download",
+    saveConsentGiven: false
+  };
+
+  var $ = function(id){ return document.getElementById(id); };
+  var video = $("video"), overlay = $("overlay"), camWrap = $("camera-wrap");
+  var octx = overlay.getContext("2d");
+
+  /* ---------------- 端末判定（案内文の出し分け用） ---------------- */
+  var ua = navigator.userAgent || "";
+  var IS_IOS = /iPad|iPhone|iPod/.test(ua) && !window.MSStream;
+  var IS_ANDROID = /Android/.test(ua);
+
+  /* ---------------- カメラ許可フロー ---------------- */
+  buildStyleCarousel();
+  updatePermissionNote("checking", "許可状況を確認中…");
+  checkCameraPermissionState().then(function(permState){
+    if (permState === "granted"){
+      updatePermissionNote("granted", "カメラは許可されています");
+      $("start-btn").textContent = "はじめる";
+    } else if (permState === "denied"){
+      updatePermissionNote("denied", "カメラがブロックされています。ボタンから許可方法を確認できます");
+      $("start-btn").textContent = "許可のしかたを見る";
+    } else {
+      updatePermissionNote("prompt", "はじめて起動する時にカメラへのアクセスを確認します");
+      $("start-btn").textContent = "カメラへのアクセスを許可";
+    }
+  });
+
+  function updatePermissionNote(kind, text){
+    var note = $("permission-note");
+    note.className = "state-" + kind;
+    note.textContent = (kind === "denied" ? "🚫 " : kind === "granted" ? "✅ " : "🔍 ") + text;
+  }
+
+  function checkCameraPermissionState(){
+    if (!navigator.permissions || !navigator.permissions.query){
+      return Promise.resolve("prompt"); // Permissions APIが無いブラウザ（iOS Safari等）は都度確認
+    }
+    return navigator.permissions.query({ name:"camera" }).then(function(status){
+      // 状態が変わったら通知欄を更新（ブラウザの設定画面からON/OFFした場合など）
+      status.onchange = function(){ updatePermissionNote(status.state, permissionStateLabel(status.state)); };
+      return status.state; // "granted" | "denied" | "prompt"
+    }).catch(function(){ return "prompt"; });
+  }
+  function permissionStateLabel(s){
+    if (s === "granted") return "カメラは許可されています";
+    if (s === "denied") return "カメラがブロックされています";
+    return "カメラへのアクセスをこれから確認します";
+  }
+
+  /* ---------------- 起動画面ボタン ---------------- */
+  $("start-btn").addEventListener("click", function(){
+    checkCameraPermissionState().then(function(permState){
+      if (permState === "denied"){
+        showPermissionDeniedScreen();
+        return;
+      }
+      $("start-screen").setAttribute("hidden","");
+      boot();
+    });
+  });
+
+  $("permission-retry-btn").addEventListener("click", function(){
+    $("permission-screen").setAttribute("hidden","");
+    $("start-screen").removeAttribute("hidden");
+    checkCameraPermissionState().then(function(permState){
+      updatePermissionNote(permState, permissionStateLabel(permState));
+      $("start-btn").textContent = permState === "denied" ? "許可のしかたを見る" : "カメラへのアクセスを許可";
+    });
+  });
+
+  function showPermissionDeniedScreen(){
+    var steps = $("permission-steps");
+    var html = "";
+    if (IS_IOS){
+      html = "<b>iPhone / iPad（Safari）の場合</b><ol>" +
+        "<li>「設定」アプリを開く</li>" +
+        "<li>下にスクロールして「Safari」をタップ</li>" +
+        "<li>「カメラ」を選び「許可」に変更</li>" +
+        "<li>このページに戻って「もう一度試す」をタップ</li>" +
+        "</ol>";
+    } else if (IS_ANDROID){
+      html = "<b>Android（Chrome）の場合</b><ol>" +
+        "<li>アドレスバー左の鍵/設定アイコンをタップ</li>" +
+        "<li>「サイトの設定」または「権限」を開く</li>" +
+        "<li>「カメラ」を「許可」に変更</li>" +
+        "<li>このページに戻って「もう一度試す」をタップ</li>" +
+        "</ol>";
+    } else {
+      html = "<b>パソコンのブラウザの場合</b><ol>" +
+        "<li>アドレスバー付近のカメラアイコンをタップ</li>" +
+        "<li>このサイトのカメラを「許可」に変更</li>" +
+        "<li>ページを再読み込みしてください</li>" +
+        "</ol>";
+    }
+    steps.innerHTML = html;
+    $("permission-screen").removeAttribute("hidden");
+  }
+
+  function boot(){
+    loadModels().then(function(){
+      state.modelsReady = true;
+      $("loading-detail").textContent = "カメラを起動しています";
+      return startCamera();
+    }).then(function(){
+      hideLoading();
+      requestAnimationFrame(detectLoop);
+    }).catch(function(err){
+      console.error(err);
+      if (isCameraPermissionError(err)){
+        hideLoading();
+        $("start-screen").removeAttribute("hidden");
+        showPermissionDeniedScreen();
+        return;
+      }
+      $("loading-detail").textContent = "モデルの読み込みに失敗しました。通常撮影のみ利用できます。";
+      // モデルなしでもカメラだけは起動して撮影可能にする
+      startCamera().then(function(){ hideLoading(); }).catch(function(err2){
+        hideLoading();
+        if (isCameraPermissionError(err2)){
+          $("start-screen").removeAttribute("hidden");
+          showPermissionDeniedScreen();
+        } else {
+          $("start-screen").removeAttribute("hidden");
+          showToastOnStart("カメラを起動できませんでした");
+        }
+      });
+    });
+  }
+
+  function isCameraPermissionError(err){
+    return err && (err.name === "NotAllowedError" || err.name === "PermissionDeniedError" || err.name === "SecurityError");
+  }
+  function showToastOnStart(msg){
+    // 起動画面上での簡易メッセージ表示（トースト要素は起動後にしか意味を持たないため専用処理）
+    var note = $("permission-note");
+    note.className = "state-denied";
+    note.textContent = "⚠️ " + msg;
+  }
+
+  function hideLoading(){ $("loading").classList.add("hide"); }
+
+  function loadModels(){
+    if (typeof faceapi === "undefined") return Promise.reject(new Error("face-api.js not loaded"));
+    return Promise.all([
+      faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
+      faceapi.nets.faceLandmark68TinyNet.loadFromUri(MODEL_URL)
+    ]);
+  }
+
+  /* ---------------- カメラ ---------------- */
+  function startCamera(){
+    if (state.stream){
+      state.stream.getTracks().forEach(function(t){ t.stop(); });
+    }
+    var constraints = {
+      audio:false,
+      video:{
+        facingMode: state.facing,
+        width:{ ideal:1280 }, height:{ ideal:1280 }
+      }
+    };
+    return navigator.mediaDevices.getUserMedia(constraints).then(function(stream){
+      state.stream = stream;
+      video.srcObject = stream;
+      video.classList.toggle("mirror", state.facing === "user");
+      return new Promise(function(res){
+        video.onloadedmetadata = function(){
+          video.play();
+          resizeCanvas();
+          res();
+        };
+      });
+    });
+  }
+
+  function resizeCanvas(){
+    var r = overlay.getBoundingClientRect();
+    overlay.width = r.width; overlay.height = r.height;
+  }
+  window.addEventListener("resize", resizeCanvas);
+
+  $("flip-btn").addEventListener("click", function(){
+    state.facing = (state.facing === "user") ? "environment" : "user";
+    showToast(state.facing === "user" ? "内側カメラに切り替え" : "外側カメラに切り替え");
+    startCamera().catch(function(){ showToast("カメラの切り替えに失敗しました"); });
+  });
+
+  $("torch-btn").addEventListener("click", function(){
+    if (!state.stream) return;
+    var track = state.stream.getVideoTracks()[0];
+    var caps = track.getCapabilities ? track.getCapabilities() : {};
+    if (!caps.torch){
+      showToast("この端末ではフラッシュを操作できません");
+      return;
+    }
+    state.torchOn = !state.torchOn;
+    track.applyConstraints({ advanced:[{ torch: state.torchOn }] }).then(function(){
+      $("torch-btn").classList.toggle("active", state.torchOn);
+    }).catch(function(){ showToast("フラッシュの切り替えに失敗しました"); });
+  });
+
+  /* ---------------- ズーム（デジタル） ---------------- */
+  $("zoom-slider").addEventListener("input", function(e){
+    state.zoom = parseFloat(e.target.value);
+    camWrap.style.transform = "scale(" + state.zoom + ")";
+  });
+
+  /* ---------------- スタイル選択 ---------------- */
+  function buildStyleCarousel(){
+    var wrap = $("style-carousel");
+    STYLES.forEach(function(st, i){
+      var chip = document.createElement("div");
+      chip.className = "style-chip" + (i === state.styleIndex ? " active" : "");
+      chip.dataset.index = i;
+      var sw = document.createElement("div");
+      sw.className = "swatch";
+      sw.style.background = st.ear;
+      sw.innerHTML = miniEarIcon(st);
+      var label = document.createElement("span");
+      label.textContent = st.name;
+      chip.appendChild(sw); chip.appendChild(label);
+      chip.addEventListener("click", function(){
+        state.styleIndex = i;
+        Array.prototype.forEach.call(wrap.children, function(c){ c.classList.remove("active"); });
+        chip.classList.add("active");
+        showToast(st.name + " にしたよ");
+      });
+      wrap.appendChild(chip);
+    });
+  }
+  function miniEarIcon(st){
+    return '<svg width="26" height="26" viewBox="0 0 40 40">' +
+      '<ellipse cx="20" cy="20" rx="10" ry="13" fill="' + st.earIn + '"/></svg>';
+  }
+
+  /* ---------------- サイズ / もりもり ---------------- */
+  $("size-btn").addEventListener("click", function(){
+    state.sizeIndex = (state.sizeIndex + 1) % SIZES.length;
+    $("size-btn").textContent = "サイズ：" + SIZES[state.sizeIndex].label;
+  });
+  $("mori-btn").addEventListener("click", function(){
+    state.mori = !state.mori;
+    $("mori-btn").textContent = "もりもり：" + (state.mori ? "ON" : "OFF");
+    $("mori-btn").classList.toggle("active", state.mori);
+    if (state.mori) showToast("両肩にもわんこ追加！");
+  });
+  $("save-toggle-btn").addEventListener("click", function(){
+    state.saveRaw = !state.saveRaw;
+    $("save-toggle-btn").classList.toggle("active", state.saveRaw);
+    $("save-toggle-btn").querySelector("span").textContent = state.saveRaw ? "素顔保存" : "直撮り";
+    showToast(state.saveRaw ? "わんこ無しで保存します" : "わんこ付きで保存します");
+  });
+  $("mirror-info-btn").addEventListener("click", function(){
+    showToast("顔検出はすべて端末内で処理、写真は保存されるまで送信されません");
+  });
+
+  /* ---------------- 保存方法の判定・切替 ---------------- */
+  var CAN_SHARE_FILES = !!(navigator.canShare && navigator.share);
+  state.saveMethod = CAN_SHARE_FILES ? "share" : "download";
+  $("save-method-btn").textContent = "保存方法：" + (state.saveMethod === "share" ? "共有" : "ダウンロード");
+  if (!CAN_SHARE_FILES){
+    $("save-method-btn").style.opacity = "0.5";
+  }
+  $("save-method-btn").addEventListener("click", function(){
+    if (!CAN_SHARE_FILES){
+      showToast("このブラウザは共有保存に対応していません");
+      return;
+    }
+    state.saveMethod = (state.saveMethod === "share") ? "download" : "share";
+    $("save-method-btn").textContent = "保存方法：" + (state.saveMethod === "share" ? "共有" : "ダウンロード");
+    state.saveConsentGiven = false; // 方法を変えたら次回また案内を出す
+    showToast(state.saveMethod === "share" ? "共有シート経由で保存します" : "ブラウザのダウンロードで保存します");
+  });
+
+  /* ---------------- 検出ループ ---------------- */
+  function detectLoop(){
+    requestAnimationFrame(detectLoop);
+    if (!state.modelsReady || video.readyState < 2 || state.detecting) return;
+    state.detecting = true;
+    var opts = new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.5 });
+    faceapi.detectAllFaces(video, opts).withFaceLandmarks(true).then(function(results){
+      state.lastDetections = results || [];
+      render(results || []);
+      $("no-face-hint").classList.toggle("show", (results || []).length === 0);
+    }).catch(function(){ /* 検出エラーは無視して次フレームへ */ })
+      .finally(function(){ state.detecting = false; });
+  }
+
+  function render(results){
+    octx.clearRect(0,0,overlay.width, overlay.height);
+    var scaleX = overlay.width / video.videoWidth;
+    var scaleY = overlay.height / video.videoHeight;
+    var mirror = state.facing === "user";
+    var style = STYLES[state.styleIndex];
+    var sizeMult = SIZES[state.sizeIndex].mult;
+
+    results.forEach(function(res){
+      var lm = res.landmarks;
+      var leftEyePts = lm.getLeftEye(), rightEyePts = lm.getRightEye();
+      var jaw = lm.getJawOutline();
+      var nose = lm.getNose();
+
+      var lc = avgPoint(leftEyePts), rc = avgPoint(rightEyePts);
+      var toCanvas = function(p){
+        var x = p.x * scaleX, y = p.y * scaleY;
+        if (mirror) x = overlay.width - x;
+        return { x:x, y:y };
+      };
+      var lcC = toCanvas(lc), rcC = toCanvas(rc);
+      // ミラー時は左右反転するので、角度計算はミラー後の座標で行う
+      var eyeDist = Math.hypot(rcC.x - lcC.x, rcC.y - lcC.y);
+      var angle = Math.atan2(rcC.y - lcC.y, rcC.x - lcC.x);
+      var faceCenter = { x:(lcC.x + rcC.x)/2, y:(lcC.y + rcC.y)/2 };
+      var jawBottom = jaw.reduce(function(a,p){ return p.y > a.y ? p : a; }, jaw[0]);
+      var jawBottomC = toCanvas(jawBottom);
+      var noseTip = nose[nose.length-1] || nose[0];
+      var noseTipC = toCanvas(noseTip);
+
+      drawDog(octx, {
+        faceCenter: faceCenter,
+        angle: angle,
+        eyeDist: eyeDist,
+        jawBottom: jawBottomC,
+        noseTip: noseTipC,
+        style: style,
+        sizeMult: sizeMult,
+        mori: state.mori
+      });
+    });
+  }
+
+  function avgPoint(pts){
+    var sx=0, sy=0;
+    pts.forEach(function(p){ sx+=p.x; sy+=p.y; });
+    return { x: sx/pts.length, y: sy/pts.length };
+  }
+
+  /* ---------------- わんこ描画本体 ---------------- */
+  function rotAround(px, py, cx, cy, ang){
+    var dx = px-cx, dy = py-cy;
+    var cos = Math.cos(ang), sin = Math.sin(ang);
+    return { x: cx + dx*cos - dy*sin, y: cy + dx*sin + dy*cos };
+  }
+
+  function drawDog(ctx, p){
+    var s = p.style, mult = p.sizeMult, ed = p.eyeDist;
+    var cx = p.faceCenter.x, cy = p.faceCenter.y;
+    var unit = ed * mult;
+    var headTopY = cy - unit * 1.55;
+
+    ctx.save();
+
+    /* --- 耳（頭の傾きに合わせて回転） --- */
+    [ -1, 1 ].forEach(function(side){
+      var baseX = cx + side * unit * 0.95;
+      var baseY = headTopY + unit * 0.35;
+      var pt = rotAround(baseX, baseY, cx, cy, p.angle);
+      drawEar(ctx, pt.x, pt.y, unit, p.angle + side*0.15, side, s);
+    });
+
+    /* --- 頭頂の毛/リボン/ヘッドバンド等アクセサリ --- */
+    var crownPt = rotAround(cx, headTopY, cx, cy, p.angle);
+    if (s.accessory === "headband") drawHeadband(ctx, crownPt.x, crownPt.y, unit, p.angle, s);
+    if (s.accessory === "ribbon") drawRibbon(ctx, crownPt.x - unit*0.7, crownPt.y - unit*0.1, unit, s);
+
+    /* --- 鼻・舌（鼻先ランドマークに追従） --- */
+    drawSnout(ctx, p.noseTip.x, p.noseTip.y, unit, p.angle, s);
+
+    /* --- サングラス（目のライン上） --- */
+    if (s.accessory === "sunglasses") drawSunglasses(ctx, cx, cy, unit, p.angle);
+    if (s.accessory === "sleepy") drawSleepyLids(ctx, cx, cy, unit, p.angle);
+
+    ctx.restore();
+
+    /* --- もりもりモード：両肩に肉球 --- */
+    if (p.mori){
+      var shoulderY = p.jawBottom.y + unit*0.9;
+      [ -1, 1 ].forEach(function(side){
+        var sx = cx + side*unit*1.6;
+        drawPaw(ctx, sx, shoulderY, unit*0.55, s);
+      });
+    }
+  }
+
+  function drawEar(ctx, x, y, u, ang, side, s){
+    ctx.save();
+    ctx.translate(x,y);
+    ctx.rotate(ang);
+    var w = u*0.62, h = u*(s.fluffy? 1.05 : 0.95);
+    var droop = s.droop || 0;
+    ctx.rotate(side * droop);
+
+    ctx.beginPath();
+    ctx.moveTo(0,0);
+    ctx.bezierCurveTo(-w*0.9, -h*0.3, -w*0.55, -h*1.05, side*w*0.05, -h*1.2);
+    ctx.bezierCurveTo(w*0.6, -h*1.0, w*0.85, -h*0.25, 0,0);
+    ctx.closePath();
+    ctx.fillStyle = s.ear;
+    ctx.shadowColor = "rgba(0,0,0,0.25)";
+    ctx.shadowBlur = u*0.08;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+
+    // 内側の毛色
+    ctx.beginPath();
+    ctx.moveTo(0,-h*0.05);
+    ctx.bezierCurveTo(-w*0.5, -h*0.35, -w*0.32, -h*0.8, side*w*0.03, -h*0.92);
+    ctx.bezierCurveTo(w*0.36, -h*0.78, w*0.5, -h*0.32, 0,-h*0.05);
+    ctx.closePath();
+    ctx.fillStyle = s.earIn;
+    ctx.fill();
+
+    if (s.spotted){
+      ctx.fillStyle = "rgba(255,255,255,0.85)";
+      ctx.beginPath(); ctx.ellipse(-w*0.15, -h*0.55, w*0.14, h*0.1, 0.3, 0, Math.PI*2); ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  function drawSnout(ctx, x, y, u, ang, s){
+    ctx.save();
+    ctx.translate(x,y);
+    ctx.rotate(ang);
+    var w = u*0.42, h = u*0.3;
+
+    ctx.beginPath();
+    ctx.ellipse(0, h*0.05, w, h, 0, 0, Math.PI*2);
+    ctx.fillStyle = s.furTip || s.ear;
+    ctx.globalAlpha = 0.94;
+    ctx.fill();
+    ctx.globalAlpha = 1;
+
+    // 鼻
+    ctx.beginPath();
+    ctx.ellipse(0, -h*0.35, w*0.34, h*0.32, 0, 0, Math.PI*2);
+    ctx.fillStyle = "#2A1A12";
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(-w*0.12,-h*0.42, w*0.08, h*0.1, 0.3, 0, Math.PI*2);
+    ctx.fillStyle = "rgba(255,255,255,0.5)";
+    ctx.fill();
+
+    // 口ライン
+    ctx.strokeStyle = "#2A1A12";
+    ctx.lineWidth = Math.max(1.5, u*0.02);
+    ctx.beginPath();
+    ctx.moveTo(0, -h*0.1);
+    ctx.lineTo(0, h*0.35);
+    ctx.quadraticCurveTo(-w*0.4, h*0.55, -w*0.55, h*0.3);
+    ctx.moveTo(0, h*0.35);
+    ctx.quadraticCurveTo(w*0.4, h*0.55, w*0.55, h*0.3);
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  function drawSunglasses(ctx, cx, cy, u, ang){
+    ctx.save();
+    ctx.translate(cx,cy);
+    ctx.rotate(ang);
+    var w = u*0.5, h = u*0.28, gap = u*0.18;
+    ctx.fillStyle = "rgba(20,20,20,0.88)";
+    [-1,1].forEach(function(side){
+      ctx.beginPath();
+      ctx.ellipse(side*(gap+w/2), 0, w/2, h/2, 0, 0, Math.PI*2);
+      ctx.fill();
+    });
+    ctx.strokeStyle = "#222"; ctx.lineWidth = u*0.03;
+    ctx.beginPath(); ctx.moveTo(-gap, 0); ctx.lineTo(gap, 0); ctx.stroke();
+    ctx.beginPath();
+    ctx.ellipse(-w*0.75-gap, -h*0.15, w*0.14, h*0.1, -0.3, 0, Math.PI*2);
+    ctx.fillStyle="rgba(255,255,255,0.35)"; ctx.fill();
+    ctx.restore();
+  }
+
+  function drawSleepyLids(ctx, cx, cy, u, ang){
+    ctx.save();
+    ctx.translate(cx,cy);
+    ctx.rotate(ang);
+    ctx.strokeStyle = "#4A2C1D"; ctx.lineWidth = Math.max(2,u*0.035);
+    ctx.lineCap = "round";
+    [-1,1].forEach(function(side){
+      ctx.beginPath();
+      ctx.moveTo(side*u*0.22, -u*0.02);
+      ctx.quadraticCurveTo(side*u*0.42, u*0.08, side*u*0.58, -u*0.02);
+      ctx.stroke();
+    });
+    ctx.restore();
+  }
+
+  function drawHeadband(ctx, x, y, u, ang, s){
+    ctx.save();
+    ctx.translate(x,y);
+    ctx.rotate(ang);
+    ctx.fillStyle = "#3B2A20";
+    ctx.fillRect(-u*1.05, -u*0.14, u*2.1, u*0.24);
+    ctx.fillStyle = "#C0392B";
+    ctx.beginPath();
+    ctx.moveTo(u*1.05,-u*0.02); ctx.lineTo(u*1.4,-u*0.16); ctx.lineTo(u*1.32, u*0.05); ctx.lineTo(u*1.4, u*0.2); ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function drawRibbon(ctx, x, y, u, s){
+    ctx.save();
+    ctx.translate(x,y);
+    ctx.fillStyle = "#E8628A";
+    [-1,1].forEach(function(side){
+      ctx.beginPath();
+      ctx.moveTo(0,0);
+      ctx.quadraticCurveTo(side*u*0.35, -u*0.28, side*u*0.5, u*0.02);
+      ctx.quadraticCurveTo(side*u*0.3, u*0.18, 0,0);
+      ctx.closePath(); ctx.fill();
+    });
+    ctx.beginPath(); ctx.arc(0,0,u*0.1,0,Math.PI*2);
+    ctx.fillStyle="#C2416B"; ctx.fill();
+    ctx.restore();
+  }
+
+  function drawPaw(ctx, x, y, r, s){
+    ctx.save();
+    ctx.translate(x,y);
+    ctx.fillStyle = s.ear;
+    ctx.globalAlpha = 0.92;
+    ctx.beginPath(); ctx.ellipse(0, r*0.2, r*0.55, r*0.42, 0, 0, Math.PI*2); ctx.fill();
+    [ [-0.55,-0.55],[-0.18,-0.85],[0.18,-0.85],[0.55,-0.55] ].forEach(function(o){
+      ctx.beginPath(); ctx.ellipse(o[0]*r, o[1]*r*0.6, r*0.22, r*0.28, 0, 0, Math.PI*2); ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+    ctx.restore();
+  }
+
+  /* ---------------- 撮影 ---------------- */
+  $("shutter-btn").addEventListener("click", takePhoto);
+
+  function takePhoto(){
+    var flare = $("flash-flare");
+    flare.classList.remove("on"); void flare.offsetWidth; flare.classList.add("on");
+
+    var vw = video.videoWidth, vh = video.videoHeight;
+    var cap = document.createElement("canvas");
+    cap.width = vw; cap.height = vh;
+    var cctx = cap.getContext("2d");
+    var mirror = state.facing === "user";
+
+    cctx.save();
+    if (mirror){ cctx.translate(vw,0); cctx.scale(-1,1); }
+    cctx.drawImage(video, 0, 0, vw, vh);
+    cctx.restore();
+
+    if (!state.saveRaw){
+      // オーバーレイ座標は overlay(表示解像度)基準なので実サイズへスケール
+      var sx = vw / overlay.width, sy = vh / overlay.height;
+      cctx.save();
+      cctx.scale(sx, sy);
+      cctx.drawImage(overlay, 0, 0);
+      cctx.restore();
+    }
+
+    var url = cap.toDataURL("image/png");
+    $("result-img").src = url;
+    $("result-cap").textContent = state.lastDetections.length ? "わん！撮れました" : "撮れました（頭は見つかりませんでした）";
+    $("result-modal").removeAttribute("hidden");
+  }
+
+  $("retake-btn").addEventListener("click", function(){
+    $("result-modal").setAttribute("hidden","");
+  });
+
+  $("download-btn").addEventListener("click", function(){
+    if (state.saveConsentGiven){
+      performSave();
+      return;
+    }
+    var note = $("save-method-note");
+    if (state.saveMethod === "share"){
+      $("save-consent-text").textContent = "この後に出てくる共有画面で「画像を保存」または「写真に追加」を選ぶと、端末の写真アプリに保存されます。";
+      note.textContent = IS_IOS
+        ? "iPhoneでは共有シートの「画像を保存」で写真アプリに保存されます。"
+        : "Android では共有シートの「保存」または「Files」アプリ経由で保存できます。";
+    } else {
+      $("save-consent-text").textContent = "ブラウザのダウンロード機能で画像を保存します。保存先は端末の「ダウンロード」フォルダ、または写真アプリになります（ブラウザ設定により異なります）。";
+      note.textContent = "保存後は端末の「ファイル」または「ダウンロード」アプリからも確認できます。";
+    }
+    $("save-consent-modal").removeAttribute("hidden");
+  });
+
+  $("save-consent-cancel-btn").addEventListener("click", function(){
+    $("save-consent-modal").setAttribute("hidden","");
+  });
+
+  $("save-consent-confirm-btn").addEventListener("click", function(){
+    state.saveConsentGiven = true;
+    $("save-consent-modal").setAttribute("hidden","");
+    performSave();
+  });
+
+  function performSave(){
+    var dataUrl = $("result-img").src;
+    var ts = new Date().toISOString().replace(/[:.]/g,"-");
+    var filename = "wanko-camera-" + ts + ".png";
+
+    if (state.saveMethod === "share"){
+      var blob = dataURLtoBlob(dataUrl);
+      var file = new File([blob], filename, { type:"image/png" });
+      if (navigator.canShare && navigator.canShare({ files:[file] })){
+        navigator.share({ files:[file], title:"わんこカメラ", text:"わんこカメラで撮影したよ！" })
+          .then(function(){ showToast("保存できたよ！わん！"); })
+          .catch(function(err){
+            if (err && err.name === "AbortError") return; // 共有をキャンセルしただけなので何もしない
+            showToast("共有に失敗したのでダウンロードします");
+            downloadFallback(dataUrl, filename);
+          });
+        return;
+      }
+    }
+    downloadFallback(dataUrl, filename);
+  }
+
+  function downloadFallback(dataUrl, filename){
+    var a = document.createElement("a");
+    a.href = dataUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    showToast("保存したよ！わん！");
+  }
+
+  function dataURLtoBlob(dataUrl){
+    var parts = dataUrl.split(",");
+    var mime = parts[0].match(/:(.*?);/)[1];
+    var bin = atob(parts[1]);
+    var len = bin.length;
+    var arr = new Uint8Array(len);
+    for (var i=0; i<len; i++){ arr[i] = bin.charCodeAt(i); }
+    return new Blob([arr], { type:mime });
+  }
+
+  /* ---------------- トースト ---------------- */
+  var toastTimer = null;
+  function showToast(msg){
+    var t = $("toast");
+    t.textContent = msg;
+    t.classList.add("show");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function(){ t.classList.remove("show"); }, 1800);
+  }
+
+})();
+</script>
+</body>
+</html>
